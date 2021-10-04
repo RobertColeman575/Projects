@@ -1,0 +1,765 @@
+---
+title: "Final Portfolio"
+author: "Bo Coleman"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: fill
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+library(flexdashboard)
+library(shiny)
+library(tidyverse)
+library(plotly)
+library(haven)
+library(RColorBrewer)
+library(ggthemes)
+library(Hmisc)
+library(sf)
+library(albersusa)
+library(socviz)
+library(statebins)
+library(maps)
+
+ANES_2016 <- read_dta("anes_timeseries_2016.dta")
+```
+
+Page 1 {data-orientation=rows}
+=====================================
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Plot 1
+
+```{r}
+renderPlotly({
+  living <- ANES_2016 %>% 
+  transmute(home_own = as.numeric(V161334), educ = as.numeric(V161270)) %>%
+  mutate(home_own = case_when(home_own == 1 ~ "Rent",
+                              home_own == 2 ~ "Own home w/ Mortage Payment",
+                              home_own == 3 ~ "Own home outright",
+                              home_own == 4 ~ "Other arrangement",
+                              T ~ "Non-response"),
+         educ = case_when(educ >= 1 & educ <=8 ~ "< High School",
+                          educ == 9 ~ "High School",
+                          educ >= 10 & educ <= 12 ~ "Some College",
+                          educ == 13 ~ "Bachelor's Degree",
+                          educ == 14 | educ == 15 ~ "Master's / Professional Degree",
+                          educ == 16 ~ "Doctarate",
+                          T ~ "Other/Refused")) %>% 
+  mutate(educ = as.factor(educ) %>% 
+           fct_relevel("Doctarate", "Master's / Professional Degree",
+                       "Bachelor's Degree", "Some College", "High School",
+                       "< High School", "Other/Refused"),
+         home_own = factor(home_own,
+                           levels = c("Non-response", "Other arrangement", "Rent", "Own home w/ Mortage Payment",
+                                      "Own home outright")))
+ggplotly(ggplot(living, aes(x = home_own, fill = educ)) +
+  geom_bar() +
+  guides(x = guide_axis(angle = 45), fill = guide_legend(title = "Highest Education Level")) +
+  labs(x = "Home Ownership", y = "Number of Respondents",
+       title = "Home Ownership by Highest Education Level Achieved",
+       caption = "Non-response category contains respondents who \nrefused to answer or \"Don't know\".") +
+  scale_x_discrete(labels = c("Rent" = "Rent", 
+                                  "Own home w/ Mortage Payment" = "Own home w/\nMortage Payment", 
+                                  "Own home outright" = "Own home \n outright",
+                                  "Other arrangement" = "Other arrangement",
+                              "Non-response" = "Non-response")) +
+  scale_fill_brewer(palette = "Set2") +
+  theme_few() +
+  theme(axis.text = element_text(size = 14),
+        axis.title = element_text(size = 14),
+        axis.title.x = element_text(margin = margin(t = 20)),
+        axis.title.y = element_text(margin = margin(r = 20)),
+        legend.text = element_text(size = 14),
+        legend.title = element_text(size = 14),
+        title = element_text(size = 14, vjust = 1),
+        plot.caption = element_text(size = 10),
+        plot.caption.position = "plot")) %>% 
+  layout(xaxis = list(tickangle = -45))
+})
+```
+
+
+Page 2 {data-orientation=rows}
+=====================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Plot 2
+
+```{r}
+renderPlot({
+  inc <- ANES_2016 %>% 
+  transmute(income = V161361x, 
+            age_group = V161267x) %>% 
+  filter(income >= 0) %>% 
+  mutate(income = income %>% labelled::to_character(), 
+         age_group = age_group %>% labelled::to_factor()) %>% 
+      filter(age_group %nin% c("-2. Birth year missing", "-1. INAP, birthyear missing")) %>% 
+      mutate(age_group = fct_drop(age_group, c("-2. Birth year missing", "-1. INAP, birthyear missing")),
+             age_group = fct_relabel(age_group, ~ str_extract(., "\\s\\d.*") %>% str_trim()),
+             age_group = fct_recode(age_group, "75+" = "75 or older")) %>% 
+  mutate(income = str_remove(income, "^.*-"),
+         income = str_remove(income, "^\\d\\d."),
+         income = parse_number(income))
+
+inc2 <- ANES_2016 %>% 
+  transmute(income = V161361x, 
+            age_group = V161267x) %>% 
+  filter(income >= 0) %>% 
+  mutate(income = income %>% labelled::to_character(), 
+         age_group = age_group %>% labelled::to_factor()) %>% 
+      filter(age_group %nin% c("-2. Birth year missing", "-1. INAP, birthyear missing")) %>% 
+      mutate(age_group = fct_drop(age_group, c("-2. Birth year missing", "-1. INAP, birthyear missing")),
+             age_group = fct_relabel(age_group, ~ str_extract(., "\\s\\d.*") %>% str_trim()),
+             age_group = fct_recode(age_group, "75+" = "75 or older")) %>% 
+  mutate(income = str_remove(income, "^.*-"),
+         income = str_remove(income, "^\\d\\d."),
+         income = parse_number(income)) %>% 
+  mutate(age_group = fct_collapse(age_group,
+                                  `18-29` = c("18-20", "21-24", "25-29"),
+                                  `30-39` = c("30-34", "35-39"),
+                                  `40-49` = c("40-44", "45-49"),
+                                  `50-59` = c("50-54", "55-59"),
+                                  `60-69` = c("60-64", "65-69"),
+                                  `70+` = c("70-74", "75+")))
+
+ggplot(inc2, aes(income, color = age_group)) +
+  geom_density(alpha = 0.3, mapping = aes(y = ..scaled..), size = 3) +
+  scale_color_brewer(palette = "Paired") +
+  scale_x_continuous(labels = scales::dollar) +
+  annotate(geom = "text", x = 175000, y = 0.55,
+           label = "50-59 year-olds are among \nthe highest earners",
+           hjust = 0, size = 5) +
+  annotate(geom = "segment", x = 215000, xend = 240000, y = 0.47, yend = 0.35,
+           color = "black", size = 0.9) +
+  labs(x = "Annual Income",
+       y = "Density",
+       title = "Income Distribution Among Age Groups",
+       color = "Age") +
+  theme_solarized() +
+  theme(title = element_text(size = 17),
+        plot.title = element_text(margin = margin(b = 10)),
+        axis.title = element_text(size = 15),
+        legend.title = element_text(margin = margin(b = 5)),
+        axis.text.x = element_text(size = 14,
+                                   margin = margin(t = 5, b = 5)),
+        axis.text.y = element_text(size = 14,
+                                   margin = margin(l = 5, r = 5)),
+        legend.text = element_text(size = 15))
+}, res = 96)
+```
+
+### Information
+Raw Income data is in interval format; high end of interval used for visualization.  For example, if an individual reported an annual income of `$70,000-$74,999`, he/she has income plotted as $74,999.
+
+`$250,000 or more` income interval plotted as $250,000.
+
+Data provided by the American National Election Studies (ANES), 2016 Time Series Study.
+
+
+Page 3 {data-orientation=rows}
+=====================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+checkboxGroupInput("categories", "",
+                                choiceNames = list("Driver's License", "No Driver's License"),
+                                choiceValues = list("Drivers_license", "No_Drivers_license"),
+                                selected = list("Drivers_license", "No_Drivers_license"))
+```
+
+Density is calculated by dividing the number of `No Driver's License respondents` by `total respondents` in each Race:Social Class cross-section.
+       
+Data provided by the American National Election Studies (ANES), 2016 Time Series Study.
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Plot 3
+
+```{r}
+renderPlot({
+  fig_2 <- ANES_2016 %>%
+  transmute(soc_class = as.numeric(V161307),
+            race = as.numeric(V161310x),
+            driv_lic = as.numeric(V161339),
+            passport = as.numeric(V161340)) %>%
+  filter(soc_class %in% c(1:4), race %in% c(1:5),
+         driv_lic %in% c(1,2), passport %in% c(1,2)) %>% 
+  mutate(soc_class = recode(soc_class, `1` = "Lower_class",
+                            `2` = "Working_class",
+                            `3` = "Middle_class",
+                            `4` = "Upper_class"),
+         race = recode(race, `1`= "White",
+                       `2` = "Black",
+                       `3` = "Asian_Native_amer_or_pacif_isl",
+                       `4` = "Native_American_or_alaska_native",
+                       `5` = "Hispanic"),
+         driv_lic = recode(driv_lic, `1` = "Drivers_license",
+                           `2` = "No_Drivers_license"),
+         passport = recode(passport, `2` = 0),
+         soc_class = fct_relevel(soc_class, 
+                                 "Lower_class", "Working_class", "Middle_class", "Upper_class"))
+  fig_2 <- fig_2 %>% filter(driv_lic %in% input$categories)
+
+  ggplot(data = fig_2 %>% subset(driv_lic == "Drivers_license"), 
+       mapping = aes(reorder(race, driv_lic, length), soc_class)) +
+  geom_jitter(mapping = aes(color = driv_lic), alpha = 0.15) +
+  geom_jitter(data = fig_2 %>% subset(driv_lic == "No_Drivers_license"), 
+             mapping = aes(reorder(race, driv_lic, length), soc_class, color = driv_lic)) +
+  scale_color_manual(values = c("Drivers_license" = "gray50", "No_Drivers_license" = "blue"), labels = c("Drivers_license" = "Driver's License", "No_Drivers_license" = "No Driver's License")) +
+  annotate(geom = "rect", xmin = 2.5, xmax = 3.5,
+           ymin = 0.5, ymax = 1.45, fill = "red", alpha = 0.2) +
+  annotate(geom = "text", x = 2.5, y = 1.53,
+           label = "Highest Density of No Driver's licenses",
+           hjust = 0) +
+  labs(x = "Race",
+       y = "Social Class",
+       title = "Absence of Driver's Licenses by \nRace and Social Class") +
+  scale_x_discrete(labels = c("Native American \nor \nAlaska Native",
+                              "Asian, native \nHawaiian, or other \nPacific Islander",
+                              "Black",
+                              "Hispanic",
+                              "White")) +
+  scale_y_discrete(labels = c("Lower Class", "Working Class", "Middle Class", "Upper Class")) +
+  theme_wsj() +
+  theme(axis.title.y = element_blank(),
+        legend.title = element_blank(),
+        title = element_text(margin = margin(b = 0),
+                             size = 16),
+        legend.margin = margin(t = 0, b = 0),
+        plot.caption = element_text(size = 12))
+}, res = 96)
+```
+
+
+### Density Table
+
+```{r}
+# Density of No Driver's Licenses
+
+
+renderDataTable({
+  summary_data <- ANES_2016 %>%
+  transmute(soc_class = as.numeric(V161307),
+            race = as.numeric(V161310x),
+            driv_lic = as.numeric(V161339),
+            passport = as.numeric(V161340)) %>%
+  filter(soc_class %in% c(1:4), race %in% c(1:5),
+         driv_lic %in% c(1,2), passport %in% c(1,2)) %>% 
+  mutate(soc_class = recode(soc_class, `1` = "Lower_class",
+                            `2` = "Working_class",
+                            `3` = "Middle_class",
+                            `4` = "Upper_class"),
+         race = recode(race, `1`= "White",
+                       `2` = "Black",
+                       `3` = "Asian_Native_amer_or_pacif_isl",
+                       `4` = "Native_American_or_alaska_native",
+                       `5` = "Hispanic"),
+         driv_lic = recode(driv_lic, `1` = "Drivers_license",
+                           `2` = "No_Drivers_license"),
+         passport = recode(passport, `2` = 0),
+         soc_class = fct_relevel(soc_class, 
+                                 "Lower_class", "Working_class", "Middle_class", "Upper_class"))
+  
+  summary_data %>%
+  mutate(driv_lic = recode(driv_lic, `Drivers_license`= 1,
+                           `No_Drivers_license` = 0)) %>%
+  group_by(soc_class, race) %>%
+  summarise(avg = mean(driv_lic)) %>%
+    ungroup() %>% 
+  arrange(avg) %>% 
+    rename(`Social Class` = soc_class,
+           `Race` = race,
+           `Percent w/ Driver's License` = avg)
+})
+```
+
+
+Page 4 {data-orientation=rows}
+=====================================
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Plot 4
+
+```{r}
+renderPlot({
+  states <- maps::state.fips %>% select(fips, region, abb, polyname) %>% 
+  distinct(fips, .keep_all = T)
+
+  missing_fips <- tibble(fips = c(2, 15),
+                         region = c(4, 4),
+                         abb = c("AK", "HI"),
+                         polyname = c("alaska", "hawaii"))
+  states <- states %>% 
+  rbind(missing_fips) %>% 
+  arrange(fips)
+  
+guns <- ANES_2016 %>% 
+  transmute(state = as.numeric(V161010d),
+            guns_own = as.numeric(V161496)) %>% 
+  filter(guns_own >= 0) %>% 
+  group_by(state) %>% 
+  summarise(avg_guns_own = mean(guns_own)) %>% 
+  ungroup() %>% 
+  inner_join(states, by = c("state" = "fips")) %>% 
+  mutate(region = recode(region, `1` = "Northeast",
+                         `2` = "Midwest",
+                         `3` = "Southeast",
+                         `4` = "West"),
+         region = factor(region, levels = c("Northeast", "Southeast",
+                                            "Midwest", "West")))
+
+ggplot(guns, aes(x = reorder(abb,avg_guns_own), y = avg_guns_own, color = region)) +
+  geom_point(size = 3) +
+  geom_segment(aes(x = abb, xend = abb, y = 0, yend = avg_guns_own), size = 0.9) +
+  facet_wrap(~region, ncol = 2, scales = "free_x") +
+  labs(x = "State",
+       y = "Number of Guns Owned (per person)",
+       title = "Gun Ownership by State",
+       caption = "Data provided by the American National Election \nStudies (ANES), 2016 Time Series Study.") +
+  theme_economist_white() +
+  theme(legend.position = "none",
+        axis.title = element_text(size = 14),
+        axis.title.x = element_text(margin = margin(t = 15, b = 15)),
+        axis.title.y = element_text(margin = margin(r = 10)),
+        title = element_text(margin = margin(b = 10)),
+        plot.caption = element_text(size = 11, hjust = 1),
+        plot.caption.position = "plot",
+        axis.text.x = element_text(margin = margin(t = 2, b = 5)))
+}, res = 96)
+
+```
+
+
+Page 5 {data-orientation=rows}
+=====================================
+
+Row {.tabset}
+-----------------------------------------------------------------------
+
+### Plot 5
+
+```{r}
+renderPlot({
+  grow_up <- ANES_2016 %>% 
+  transmute(grew_up = V161330) %>%
+  filter(grew_up >= 0, grew_up <= 56) %>% 
+  mutate(grew_up = grew_up %>% labelled::to_character() %>% parse_number()) %>% 
+  count(grew_up, name = "n_grew_up")
+
+living <- ANES_2016 %>% 
+  transmute(state_liv = V161010d %>% as.numeric()) %>% 
+  count(state_liv, name = "n_now_living")
+
+moving <- grow_up %>% inner_join(living, by = c("grew_up" = "state_liv")) %>% 
+  rename(FIPS = grew_up)
+
+# get state abbreviations
+states <- maps::state.fips %>% select(fips, abb, polyname, region) %>% 
+  distinct(fips, .keep_all = T) %>% as_tibble()
+missing_fips <- tibble(fips = c(2, 15),
+                       abb = c("AK", "HI"),
+                       polyname = c("alaska", "hawaii"),
+                       region = c(4, 4))
+states <- states %>% 
+  rbind(missing_fips) %>% 
+  arrange(fips) %>% 
+  mutate(polyname = str_remove(polyname, ":.*"),
+         polyname = str_to_title(polyname),
+         polyname = recode(polyname, `District Of Columbia` = "Washington DC"),
+         region = recode(region, `1` = "Northeast",
+                         `2` = "Midwest",
+                         `3` = "Southeast",
+                         `4` = "West"),
+         region = factor(region, levels = c("Northeast", "Southeast",
+                                            "Midwest", "West")))
+
+# add abbreviations and state names to moving
+moving <- moving %>% inner_join(states, by = c("FIPS" = "fips")) %>% 
+  mutate(flow = n_now_living - n_grew_up,
+         sign = case_when(flow >= 0 ~ "Positive",
+                          T ~ "Negative"),
+         flow_pct = flow / n_grew_up)
+
+ggplot(moving, aes(x = reorder(abb, desc(flow_pct)), y = flow_pct, fill = sign, label = abb)) +
+  geom_col() +
+  geom_text(vjust = 1.5) + 
+  facet_wrap(~region, scales = "free_x") +
+  guides(fill = "none") +
+  scale_y_continuous(labels = scales::percent, limits = c(-0.62, 1.3)) +
+  labs(title = "Population Change by State",
+       y = "Change in Population",
+       subtitle = "Among US-born Individuals; From Childhood to Current Residence") +
+  theme_wsj() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        strip.text.x = element_text(size = 14),
+        axis.title = element_text(size = 20),
+        axis.title.x = element_blank(),
+        axis.title.y = element_text(size = 16, margin = margin(r = 5)),
+        plot.subtitle = element_text(size = 16),
+        plot.title = element_text(size = 25))
+}, res = 96)
+```
+
+### Information
+Change in Population (%) is calculated as the number of `US-born individuals currently residing in a state`, minus the number that `grew up in the state`, and dividing by the number that `grew up in the state`.
+
+Data provided by the American National Election Studies (ANES), 2016 Time Series Study.
+
+
+Page 6 {data-orientation=rows}
+=====================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+
+```{r}
+selectInput("ages", h3("Filter Age Groups"), 
+                         c("18-20", "21-24", "25-29", "30-34", "35-39", "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", "75+"),
+                         selected = c("18-20", "21-24", "25-29", "30-34", "35-39", "40-44", "45-49", "50-54", "55-59", "60-64", "65-69", "70-74", "75+"),
+                         multiple = T)
+```
+Use \<Del>\ to remove selections
+
+
+```{r}
+checkboxGroupInput("spend_categories", h3("Filter Spending Categories"),
+                                choiceNames = list("Aid to Poor", "Child Care", "Dealing with Crime",
+                                                   "Protecting the Environment", "Public Schools",
+                                                   "Science & Technology", "Social Security", "Welfare Programs"),
+                                choiceValues = list("aid_to_poor", "child_care", "dealing_w_crime", "prot_the_env", "public_schools", "science_and_tech", "social_security", "welfare_prog"),
+                                selected = c("aid_to_poor", "child_care", "dealing_w_crime", "prot_the_env", "public_schools", "science_and_tech", "social_security", "welfare_prog"))
+```
+
+
+Data provided by the American National Election Studies (ANES), 2016 Time Series Study.
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Plot 6
+
+```{r}
+renderPlotly({
+    fed_spending <- ANES_2016 %>%
+      transmute(age_group = V161267x, 
+                social_security = as.numeric(V161205),
+                public_schools = as.numeric(V161206),
+                science_and_tech = as.numeric(V161207),
+                dealing_w_crime = as.numeric(V161208),
+                welfare_prog = as.numeric(V161209),
+                child_care = as.numeric(V161210),
+                aid_to_poor = as.numeric(V161211),
+                prot_the_env = as.numeric(V161212)) %>% 
+      mutate(age_group = age_group %>% labelled::to_factor()) %>% 
+      filter(age_group %nin% c("-2. Birth year missing", "-1. INAP, birthyear missing")) %>% 
+      mutate(age_group = fct_drop(age_group, c("-2. Birth year missing", "-1. INAP, birthyear missing")),
+             age_group = fct_relabel(age_group, ~ str_extract(., "\\s\\d.*") %>% str_trim()),
+             age_group = fct_recode(age_group, "75+" = "75 or older")) %>% 
+      mutate_if(is.numeric, ~ recode(., `2` = 0,
+                                     `3` = 0.5)) %>% 
+      group_by(age_group) %>% 
+      summarise_at(vars(social_security:prot_the_env), mean) %>% 
+      ungroup() %>% 
+      gather("Fed_spend_cat", "support", -age_group) %>% 
+      filter(age_group %in% input$ages & Fed_spend_cat %in% input$spend_categories)
+    
+    ggplotly(ggplot(fed_spending, aes(Fed_spend_cat, age_group, fill = support)) +
+      geom_tile() +
+      scale_fill_gradient2(low = "red", mid = "white", high = "darkgreen", midpoint = 0.5,
+                           breaks = c(0, 0.5, 1), 
+                           labels = c("Decrease", "Maintain",
+                                      "Increase"),
+                           limits = c(0, 1)) +
+      scale_x_discrete(labels = c("aid_to_poor" = "Aid to Poor", 
+                                  "child_care" = "Child Care", 
+                                  "dealing_w_crime" = "Dealing with Crime",
+                                  "prot_the_env" = "Protecting the Environment", 
+                                  "public_schools" = "Public Schools",
+                                  "science_and_tech" = "Science & Technology", 
+                                  "social_security" = "Social Security", 
+                                  "welfare_prog" = "Welfare Programs")) +
+      labs(x = "Federal Spending Category",
+           y = "Age Group",
+           title = "Voter Opinion on Federal Spending by Category and Age Group",
+           fill = "Recommended Change \nto Spending",
+           caption = "Data provided by the American National Election \nStudies (ANES), 2016 Time Series Study.") +
+      theme_dark() +
+      theme(axis.title.x = element_text(vjust = -0.5, size = 14,
+                                        margin = margin(b = 10, t = 5)),
+            axis.title.y = element_text(vjust = -0.5, size = 14,
+                                        margin = margin(r = 5)),
+            axis.text.y = element_text(margin = margin(20, 10, 20, 20),
+                                       size = 12),
+            axis.text.x = element_text(size = 12,
+                                       margin = margin(t = 10),
+                                       angle = 45),
+            title = element_text(size = 14),
+            legend.text = element_text(size = 12),
+            legend.title = element_text(size = 13,
+                                        margin = margin(b = 10)),
+            plot.caption.position = "plot"))
+  })
+```
+
+
+Page 7 {data-orientation=rows}
+=====================================
+
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Plot 7
+
+```{r}
+renderPlot({
+  fig <- ANES_2016 %>% 
+  transmute(grew_up = V161330 %>% labelled::to_character() %>% parse_number(),
+            immigration = V162157 %>% as.numeric()) %>%
+  filter(immigration > 0) %>% 
+  mutate(immigration = recode(immigration, `1` = 1,
+                              `2` = 0.75,
+                              `3` = 0.5,
+                              `4` = 0.25,
+                              `5` = 0)) %>% 
+  group_by(grew_up) %>% 
+  summarise(avg_immigration = mean(immigration)) %>% 
+  ungroup() %>% 
+  right_join(election %>% select(st, fips), by = c("grew_up" = "fips")) %>% 
+  select(state = st, avg_immigration, fips = grew_up)
+
+
+ggplot(fig, aes(state = state, fill = avg_immigration)) +
+  geom_statebins(radius = grid::unit(0, "pt")) +
+  coord_equal() +
+  scale_fill_gradient2(low = "red", mid = "white", high = "darkgreen", midpoint = 0.5,
+                       breaks = c(0, 0.5, 1), 
+                       labels = c("Decrease", "Maintain",
+                                  "Increase"),
+                       limits = c(0, 1)) + 
+  labs(fill = "How Should \nImmigration \nLevels Change?",
+       title = "Effect of Where You Grow Up on Support for Immigration",
+       caption = "Data provided by the American National Election Studies (ANES), 2016 Time Series Study.") +
+  theme_map() +
+  theme(legend.position = c(-0.2,0.5),
+        title = element_text(size = 16),
+        legend.title = element_text(size = 14,
+                                    margin = margin(b = 15)),
+        legend.text = element_text(size = 12))
+}, res = 96)
+
+```
+
+
+Page 8 {data-orientation=rows}
+=====================================
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Plot 8
+
+```{r}
+renderPlot({
+  living <- ANES_2016 %>% 
+  transmute(pay_attn = as.factor(V161003), party_reg = as.numeric(V161019)) %>%
+  filter(party_reg > 0) %>% 
+  mutate(party_reg = recode(party_reg, 
+                            `1` = "Democrat", 
+                            `2` = "Republican", 
+                            `4` = "None/Independent",
+                            `5` = "Other"),
+         pay_attn = recode(pay_attn,
+                           `1` = "Always",
+                           `2` = "Most of the time",
+                           `3` = "About half the time",
+                           `4` = "Some of the time",
+                           `5` = "Never"))
+living_summary <- living %>% 
+  count(party_reg, pay_attn) %>% 
+  group_by(party_reg) %>% 
+  mutate(freq = n/sum(n),
+         prop = freq*100 %>% round(0))
+
+ggplot(living_summary, aes(reorder(party_reg, n), freq, fill = party_reg)) +
+  geom_col(position = "dodge2") +
+  coord_flip() +
+  facet_grid(~pay_attn) +
+  guides(fill = "none") +
+  labs(x = NULL,
+       y = "How often pays attention to politics and elections",
+       title = "How Often Pay Attention to Politics by Registered Party",
+       caption = "Data provided by the American National Election Studies (ANES), 2016 Time Series Study.") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = c("#2E74C0", "#CB454A", "lightgreen", "plum1"),
+                    limits = c("Democrat", "Republican", "None/Independent", "Other")) +
+  theme_fivethirtyeight() +
+  theme(axis.text.y = element_text(size = 14),
+        axis.text.x = element_text(size = 13,
+                                   margin = margin(b = 20)),
+        title = element_text(size = 14, hjust = 0.5),
+        plot.title.position = "plot",
+        plot.caption = element_text(size = 12),
+        strip.text = element_text(size = 14))
+}, res = 96)
+```
+
+
+Page 9 {data-orientation=rows}
+=====================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+States that lack respondents with registered parties are coded gray.
+
+Data provided by the American National Election Studies (ANES), 2016 Time Series Study.
+       
+
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Approval of Barack Obama handling job as President by State
+
+```{r}
+renderPlot({
+  fig_2_data <- ANES_2016 %>% 
+  transmute(reg_state = V161015b %>% labelled::to_factor(), 
+            pres_approv = as.numeric(V161082),
+            party_reg = as.numeric(V161019)) %>% 
+  filter(reg_state %nin% "-1. Inap, 3 in V161011/FTF: -8,-9 in V161011/WEB: 2,-9 in V161011a", 
+         pres_approv %in% c(1,2)) %>% 
+  mutate(reg_state = str_remove_all(reg_state, "\\d{1,}.") %>% str_trim("left"),
+         pres_approv = recode(pres_approv,`2` = 0),
+         party_reg = case_when(party_reg == 1 ~ 1,
+                               party_reg == 2 ~ 0,
+                               T ~ NA_real_))
+mean_pres_approv <- mean(fig_2_data$pres_approv)
+
+fig_2_data_summary <- fig_2_data %>%
+  group_by(reg_state) %>% 
+  summarise(avg_approv = mean(pres_approv),
+            sd_approv = sd(pres_approv),
+            party_str = mean(party_reg, na.rm = T))
+
+p <- ggplot(fig_2_data_summary, aes(x= reorder(reg_state, avg_approv), y = avg_approv, color = party_str))
+p + geom_pointrange(aes(ymin = avg_approv,
+                        ymax = avg_approv), size = 0.6) +
+  geom_hline(yintercept = mean_pres_approv) +
+  labs(x = "", 
+       y = "Approve Barack Obama Handling Job as President",
+       color = "Registered Party") + 
+  scale_color_gradient2(low="#CB454A", mid = "white", high="#2E74C0", midpoint = 0.5,
+                        breaks = c(0.05, 0.95), 
+                       labels = c("Republican", "Democrat"),
+                       limits = c(0, 1)) +
+  scale_y_continuous(labels = scales::percent,
+                     limits = c(0, 1)) +
+  annotate(geom = "text", x = "Georgia", y = 0.53,
+           label = "Respondent Average.",
+           hjust = 0, size = 4) +
+  guides(color = guide_colorbar(title.vjust = 1,
+                                ticks = F)) +
+  theme_bw() +
+  theme(plot.caption.position = "plot",
+        axis.text.x = element_text(size = 13,
+                                   margin = margin(t = 5)),
+        axis.title.x = element_text(size = 14, 
+                                    margin = margin(t = 10, b = 10)),
+        plot.title.position = "plot",
+        title = element_text(size = 14),
+        plot.caption = element_text(size = 12),
+        legend.title = element_text(margin = margin(b = 7)),
+        legend.text = element_text(size = 13)) +
+  coord_flip()
+}, res = 96)
+```
+
+
+
+Page 10 {data-orientation=rows}
+=====================================
+
+Inputs {.sidebar}
+-----------------------------------------------------------------------
+Includes both early votes cast and registered voters who intend to vote.
+
+Data provided by the American National Election Studies (ANES), 2016 Time Series Study.
+
+
+Row {data-height=650}
+-----------------------------------------------------------------------
+
+### Plot 10
+
+```{r}
+renderPlot({
+  vote <- ANES_2016 %>% 
+  transmute(reg_state = V161015b %>% labelled::to_factor(),
+         president = as.numeric(V161064x),
+         house = as.numeric(V161065x),
+         senate = as.numeric(V161066x),
+         governor = as.numeric(V161067x)) %>% 
+  filter(reg_state %nin% "-1. Inap, 3 in V161011/FTF: -8,-9 in V161011/WEB: 2,-9 in V161011a") %>% 
+  mutate(reg_state = str_remove_all(reg_state, "\\d{1,}.") %>% str_trim("left"),
+         reg_state = recode(reg_state, `Washington DC` = "District of Columbia")) %>%
+  mutate_at(vars(president:governor), ~ case_when(. %in% c(10, 20) ~ 1,
+                               . %in% c(11, 21) ~ 0,
+                               T ~ NA_real_))
+
+vote_summary <- vote %>% 
+  group_by(reg_state) %>% 
+  summarise(president = mean(president, na.rm = T),
+            house = mean(house, na.rm = T),
+            senate = mean(senate, na.rm = T),
+            governor = mean(governor, na.rm = T)) %>% 
+  ungroup() %>% 
+  gather("election", "vote", -reg_state) %>% 
+  mutate(election = factor(election, 
+                            levels = c("president", "house", "senate", "governor")))
+
+states <- usa_sf()
+
+plot_data <- states %>% left_join(vote_summary, by = c("name" = "reg_state"))
+plot_data <- plot_data %>% 
+  mutate()
+
+ggplot(data = plot_data) +
+  geom_sf(mapping = aes(fill = vote)) +
+  facet_wrap(~election,
+             labeller = as_labeller(c(`president` = "President", 
+                                      `house` = "House", 
+                                      `senate` = "Senate", 
+                                      `governor` = "Governor"))) +
+  scale_fill_gradient2(low = "#CB454A", high = "#2E74C0", mid = "white",
+                       midpoint = 0.5, breaks = c(0, 1), 
+                       labels = c("Republican", "Democrat"),
+                       limits = c(0, 1)) +
+  labs(fill = "Party",
+       title = "Pre-election Voting Intent") +
+  theme_bw() +
+  theme(legend.position = "bottom",
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid = element_blank(),
+        strip.text = element_text(size = 14),
+        title = element_text(size = 16),
+        plot.title.position = "plot",
+        plot.subtitle = element_text(size = 14),
+        legend.title = element_text(vjust = 1, margin = margin(r = 10)),
+        legend.text = element_text(size = 14))
+}, res = 96)
+```
